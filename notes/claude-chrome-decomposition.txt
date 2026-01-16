@@ -1,0 +1,406 @@
+Help me understand how this website is constructed and what APIs it is calling? I need to automate certain functions and using the same APIs that the GUI uses would be the quickest. Tell me when you're ready and I will log in
+
+
+
+
+1 step
+I'm ready to help you understand the iHCM/ADP website architecture and its API calls.
+
+Here's what we'll do:
+
+You log in - Go ahead and complete the login process on the iHCM portal
+I'll monitor network traffic - Once you're logged in, I'll capture the API calls the application makes as you navigate through different features
+Explore key features - We'll click through the main sections (timesheets, leave requests, employee info, etc.) to trigger various API endpoints
+Document the APIs - I'll compile the endpoints, request formats, authentication headers, and response structures
+This will give you a clear picture of which APIs you can leverage for automation.
+
+Please go ahead and log in, then let me know when you're ready!
+
+
+
+ok I'm logged in
+
+
+
+
+52 steps
+I've analyzed the iHCM/ADP website and captured its API structure. Here's a comprehensive summary:
+
+iHCM/ADP Website Architecture & APIs
+Base URL
+https://ihcm.adp.com/whrmux/webapi/
+
+API Categories Discovered
+1. Data APIs (/api/data/)
+Used for loading page-specific data:
+
+GET /api/data/me/home - Employee home dashboard
+GET /api/data/me/leave-absence - Leave & absence data
+GET /api/data/me/my-details - Personal details
+GET /api/data/team/home - Team dashboard
+GET /api/data/team/leave-absence - Team leave data
+2. Leave & Absence APIs (/api/leave-absence/)
+GET /api/leave-absence/balance/{date} - Leave balances for a date
+GET /api/leave-absence/absence?directReportsOnly=true|false - Absence records
+GET /api/leave-absence/team/leave-request - Team leave requests
+GET /api/leave-absence/team/upcoming?filterByEmployee= - Upcoming leave
+GET /api/leave-absence/team/sickness?filterByEmployee= - Sickness records
+GET /api/leave-absence/team-balances - Team leave balances
+GET /api/leave-absence/show-calendar - Calendar visibility settings
+GET /api/leave-absence/bespoke-calendar - Custom calendar data
+GET /api/leave-absence-calendar/leave-calendar-items - Calendar items
+POST /api/leave-absence/monthly-shift-pattern - Shift patterns
+POST /api/leave-absence/viewcalendar/leave - Calendar leave view
+GET /api/me/leave-absence/parental-leave/{employeeId} - Parental leave data
+3. Employee APIs (/api/employee/)
+POST /api/employee/direct-reports - Get direct reports
+GET /api/employee/search - Search employees
+4. Pay & Payroll APIs (/api/pay/)
+GET /api/pay/pay-statements/{count} - Pay statements
+GET /api/pay/tax-statements/{count} - Tax statements
+5. Sickness APIs (/api/sickleave/)
+GET /api/sickleave/sickleave-details?filterEmployeeId={id} - Sick leave details
+6. User/Image APIs (/api/user/)
+GET /api/user/image/{identifier}/{token} - User profile images
+7. System/Configuration APIs
+GET /api/navigation?isContentEditable=false - Navigation menu
+GET /api/theme/{themeId} - Theme settings
+GET /api/app-setting - Application settings
+GET /api/db-parameters - Database parameters
+GET /api/bu-parameter/{name} - Business unit parameters
+GET /api/gAnalytics - Analytics configuration
+GET /api/timecloud - Time tracking integration
+GET /api/messages/count - Unread message count
+POST /api/viewstate - Save view state
+GET /api/page-security?endpoint={endpoint} - Page permissions
+POST /api/page/details/endpoints - Page endpoint details
+GET /api/impersonateduser - Impersonation status
+8. Schema APIs (/schemaapi/)
+GET /schemaapi/v2/versions/form/{endpoint}?context={context} - Form schemas
+GET /schemaapi/v2/versions/formpicklist/{endpoint}?context={context} - Picklist schemas
+GET /schemaapi/v1/schemas/{hash} - Retrieve schema by hash
+Authentication
+The application uses session-based authentication with tokens in request headers. After logging in, cookies maintain the session.
+
+Key Observations for Automation
+Context parameter: Many requests include ?context=GB for localization
+Date format: Uses ISO format (e.g., 2026-01-05)
+Employee IDs: GUID format (e.g., 00000000-0000-0000-0000-000000000001)
+Deferred loading: Uses insertMode=false for read operations
+Schema-driven forms: UI forms are dynamically rendered based on schema APIs
+Which functions are you looking to automate? I can help you identify the specific API calls needed.
+
+
+
+The Directory function hints that it supports pagination, but when I click into the Directory, there doesn't seem to be a way to export all data about all people. I'm trying to help my HR business partners create automated extracts that can be compared to other directories such as Azure Active Directory.
+
+
+
+
+47 steps
+I've fully analyzed the Directory API. Here's what I found for your HR automation needs:
+
+Directory API for Employee Data Extraction
+Main Endpoint
+POST https://ihcm.adp.com/whrmux/webapi/api/employee
+
+Request Payload Structure
+json
+{
+  "start": 0,           // Starting record index (0-based)
+  "end": 19,            // Ending record index  
+  "limit": 20,          // Records per page
+  "filter": [],         // Array of filter objects
+  "boolStr": "AND",     // Filter boolean operator
+  "orderBy": "PEOPLE.LASTNAME, PEOPLE.FIRSTNAME",  // Sort order
+  "showParameterics": false
+}
+Pagination Pattern
+The UI loads 20 records at a time. When "Load more" is clicked, the system increments the start and end values by 20 (the limit).
+
+Example progression:
+
+Page 1: start: 0, end: 19
+Page 2: start: 21, end: 40 (after 1st "Load more")
+Page 3: start: 41, end: 60 (after 2nd "Load more")
+For Full Data Extraction
+To extract all 4,744 employees, your automation script would need to:
+
+Loop through pages by incrementing start and end by 20 each iteration
+Continue until you've retrieved all records (total count is 4744 based on the UI)
+Example Python pseudocode:
+
+python
+import requests
+
+base_url = "https://ihcm.adp.com/whrmux/webapi/api/employee"
+headers = {
+    "Content-Type": "application/json",
+    # Include session cookies/auth headers from your login
+}
+
+all_employees = []
+limit = 20
+start = 0
+total_count = 4744  # Or get this from first response
+
+while start < total_count:
+    payload = {
+        "start": start,
+        "end": start + limit - 1,
+        "limit": limit,
+        "filter": [],
+        "boolStr": "AND",
+        "orderBy": "PEOPLE.LASTNAME, PEOPLE.FIRSTNAME",
+        "showParameterics": False
+    }
+    
+    response = requests.post(base_url, json=payload, headers=headers)
+    employees = response.json()  # Parse employee data
+    all_employees.extend(employees)
+    
+    start += limit + 1  # Move to next page
+Data Available per Employee
+Based on the UI, each employee record includes:
+
+Name (First, Last)
+Job Title
+Organisation Unit (full hierarchy path)
+Employee ID (GUID)
+Direct Reports (count and link)
+Profile Image URL
+Additional Useful APIs
+API	Purpose
+GET /api/employee/search	Search employees by name
+GET /api/employee/direct-reports (POST)	Get direct reports for manager
+GET /api/user/image/{id}/{token}	Get profile images
+Notes for Azure AD Comparison
+For comparing with Azure AD, you'll likely want to match on:
+
+Email address (may require clicking into individual employee records)
+Employee ID
+Name fields
+The API response will contain all the employee data fields that you can then export to CSV/JSON for comparison with your Azure AD extract.
+
+Would you like me to explore what specific fields are returned in the employee API response, or help you with any other aspect of this automation?
+
+
+
+Yes explore all available fields that are returned in the employee API response, then show me what specific headers and cookies we would need to include within a python script
+
+
+
+
+29 steps
+I've captured all the key information. Here's the complete documentation:
+
+Employee API Response - All Available Fields
+Each employee record contains the following 23 fields:
+
+Field	Type	Description	Sample Value
+id	string (GUID)	Unique employee identifier	00000000-0000-0000-0000-000000000001
+fullName	string	Full display name	John Smith
+firstName	string	First name	John
+lastName	string	Last name	Smith
+knownAs	string	Preferred/known as name	John
+knownAsFnc	string	Full known as name	John Smith
+initials	string	Name initials	S
+email	string	Work email address	john.smith@example.com
+userId	string	System user ID	JOHN.SMITH
+jobTitle	string	Job title	Head of Marketplaces
+department	string	Full org hierarchy path	Acme Corp - UK - Division - Brand - B2B
+location	string/null	Work location	null
+workTelephone	string/null	Office phone	null
+workMobileTelephone	string/null	Work mobile	null
+reportsTo	string (GUID)	Manager's employee ID	00000000-0000-0000-0000-000000000002
+reportsToFullName	string	Manager's full name	Jane Doe
+reportsToUserId	string	Manager's user ID	JANE.DOE@EXAMPLE.COM
+reportsToJobtitle	string	Manager's job title	Chief Commercial Officer
+reportsToFnc	string	Manager's display name	Jane Doe
+reportsToKnownas	string	Manager's known as name	Jane
+directReports	number	Count of direct reports	2
+isSSOOnly	boolean	SSO-only login flag	false
+context	string	Country/context code	GB
+Python Script Template
+python
+import requests
+import json
+import time
+
+class IHCMDirectoryExtractor:
+    def __init__(self):
+        self.base_url = "https://ihcm.adp.com/whrmux/webapi/api"
+        self.session = requests.Session()
+        
+    def set_authentication(self, cookies_dict, xsrf_token, bearer_token):
+        """
+        Set authentication from browser session.
+        
+        To get these values:
+        1. Log into iHCM in your browser
+        2. Open Developer Tools (F12) > Network tab
+        3. Click on any API request and examine:
+           - Cookies tab for cookie values
+           - Headers tab for Authorization and X-XSRF-TOKEN
+        """
+        # Set cookies
+        for name, value in cookies_dict.items():
+            self.session.cookies.set(name, value)
+        
+        # Set headers
+        self.session.headers.update({
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json;charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-XSRF-TOKEN': xsrf_token,
+            'Authorization': f'Bearer {bearer_token}',
+            'Origin': 'https://ihcm.adp.com',
+            'Referer': 'https://ihcm.adp.com/whrmux/web/me/directory/'
+        })
+    
+    def get_employees(self, start=0, limit=20, filters=None, order_by="PEOPLE.LASTNAME, PEOPLE.FIRSTNAME"):
+        """
+        Fetch a page of employees from the directory.
+        
+        Args:
+            start: Starting record index (0-based)
+            limit: Number of records to fetch (default 20, max may vary)
+            filters: List of filter objects (optional)
+            order_by: SQL-style ORDER BY clause
+            
+        Returns:
+            List of employee dictionaries
+        """
+        payload = {
+            "start": start,
+            "end": start + limit - 1,
+            "limit": limit,
+            "filter": filters or [],
+            "boolStr": "AND",
+            "orderBy": order_by,
+            "showParameterics": False
+        }
+        
+        response = self.session.post(
+            f"{self.base_url}/employee",
+            json=payload
+        )
+        
+        response.raise_for_status()
+        return response.json()
+    
+    def get_all_employees(self, batch_size=100, delay_between_batches=0.5):
+        """
+        Extract all employees from the directory.
+        
+        Args:
+            batch_size: Number of records per request (try 100, reduce if errors)
+            delay_between_batches: Seconds to wait between requests (be polite!)
+            
+        Returns:
+            List of all employee records
+        """
+        all_employees = []
+        start = 0
+        
+        # First request to get total count
+        print("Fetching initial batch...")
+        first_batch = self.get_employees(start=0, limit=batch_size)
+        all_employees.extend(first_batch)
+        
+        # Note: The API doesn't return total count directly
+        # You may need to continue until you get fewer records than requested
+        
+        start = batch_size
+        
+        while True:
+            print(f"Fetching records {start} to {start + batch_size}...")
+            
+            batch = self.get_employees(start=start, limit=batch_size)
+            
+            if not batch or len(batch) == 0:
+                print("No more records found.")
+                break
+                
+            all_employees.extend(batch)
+            
+            if len(batch) < batch_size:
+                print("Reached end of records.")
+                break
+            
+            start += batch_size
+            time.sleep(delay_between_batches)  # Rate limiting
+        
+        print(f"Total employees extracted: {len(all_employees)}")
+        return all_employees
+    
+    def export_to_csv(self, employees, filename="ihcm_directory.csv"):
+        """Export employees to CSV for Azure AD comparison."""
+        import csv
+        
+        # Define fields for export (subset most useful for AD comparison)
+        export_fields = [
+            'id', 'email', 'userId', 'fullName', 'firstName', 'lastName',
+            'knownAs', 'jobTitle', 'department', 'location',
+            'workTelephone', 'workMobileTelephone',
+            'reportsTo', 'reportsToFullName', 'reportsToUserId',
+            'directReports', 'context'
+        ]
+        
+        with open(filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=export_fields, extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(employees)
+        
+        print(f"Exported {len(employees)} employees to {filename}")
+
+
+# =============================================================================
+# USAGE EXAMPLE
+# =============================================================================
+
+if __name__ == "__main__":
+    extractor = IHCMDirectoryExtractor()
+    
+    # You need to get these values from your browser session:
+    # 1. Log into iHCM
+    # 2. Open Developer Tools > Network tab
+    # 3. Trigger an API call (e.g., load directory)
+    # 4. Find a request to /api/employee
+    # 5. Copy the cookie and header values
+    
+    cookies = {
+        'XSRF-TOKEN': 'YOUR_XSRF_TOKEN_HERE',
+        'AWSALB': 'YOUR_AWSALB_COOKIE',
+        'AWSALBCORS': 'YOUR_AWSALBCORS_COOKIE',
+        # Add other cookies from your session
+    }
+    
+    xsrf_token = 'YOUR_XSRF_TOKEN_HERE'  # Same as cookie value
+    bearer_token = 'YOUR_JWT_BEARER_TOKEN_HERE'
+    
+    extractor.set_authentication(cookies, xsrf_token, bearer_token)
+    
+    # Extract all employees
+    employees = extractor.get_all_employees(batch_size=100)
+    
+    # Export to CSV
+    extractor.export_to_csv(employees)
+Required Authentication Components
+Component	Source	Description
+Cookies	Browser session	Multiple cookies maintain session state
+XSRF-TOKEN	Cookie & Header	CSRF protection token (same value in both)
+AWSALB / AWSALBCORS	Cookies	AWS load balancer session affinity
+Authorization	Header	Bearer JWT token from login
+Content-Type	Header	application/json;charset=UTF-8
+X-Requested-With	Header	XMLHttpRequest
+Key Fields for Azure AD Comparison
+For matching with Azure AD, focus on these fields:
+
+email - Primary match key (work email)
+userId - Secondary match (often matches AD UPN)
+firstName / lastName - Name matching
+jobTitle - Compare title accuracy
+department - Compare org structure
+reportsToFullName / reportsToUserId - Validate manager relationships
+Would you like me to help you with getting the actual authentication tokens from your session, or explore any other aspects of the API?

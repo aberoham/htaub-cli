@@ -1,0 +1,219 @@
+ADP iHCM People Home API - Pagination Documentation for Claude Code
+API Endpoint
+POST https://ihcm.adp.com/whrmux/webapi/api/schema-grid/data
+Pagination Mechanism
+The API uses offset-based pagination with a paging object in the POST body.
+Paging Object Structure
+json{
+  "paging": {
+    "start": 1,      // 1-based starting index
+    "limit": 20,     // Number of records per page (10, 20, 50, or 100)
+    "end": 20,       // Ending index (start + limit - 1, but shown as start + limit)
+    "total": 4380    // Total number of records (returned from previous request)
+  }
+}
+```
+
+### Pagination Behavior
+
+| Action | start | limit | end | Notes |
+|--------|-------|-------|-----|-------|
+| Initial Load | 1 | 20 | 20 | Default page size is 20 |
+| Load More (1st) | 21 | 20 | 40 | Appends next batch |
+| Load More (2nd) | 41 | 20 | 60 | Continues appending |
+| Change Page Size to 100 | 1 | 100 | 100 | Resets to beginning |
+
+### Formula
+```
+next_start = current_start + limit
+next_end = next_start + limit - 1
+Complete POST Payload Template for Claude Code
+python# Python example for Claude Code automation
+
+import requests
+import json
+
+def fetch_people_page(
+    bearer_token: str,
+    record_id: str,
+    start: int = 1,
+    limit: int = 100,
+    search_value: str = "",
+    status_filter: str = None,  # "Current", "Leaver", "None", or None for all
+    sort_by: str = "fullName",
+    sort_direction: str = "asc"  # "asc" or "desc"
+) -> dict:
+    """
+    Fetch a page of people from ADP iHCM.
+    
+    Args:
+        bearer_token: The iHcmBearerToken from sessionStorage
+        record_id: The user's record UUID
+        start: Starting index (1-based)
+        limit: Number of records per page (10, 20, 50, or 100)
+        search_value: Free text search query
+        status_filter: Filter by status
+        sort_by: Field to sort by
+        sort_direction: Sort direction
+    
+    Returns:
+        dict with 'data' (list of people) and 'total' (count)
+    """
+    
+    url = "https://ihcm.adp.com/whrmux/webapi/api/schema-grid/data"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {bearer_token}"
+    }
+    
+    payload = {
+        "parentRoute": "expert",
+        "dataFromApi": False,
+        "recordId": record_id,
+        "instanceName": "grid-controller-copListingGridSection",
+        "gridName": "copListingGridSection",
+        "searchValue": search_value,
+        "formParams": {
+            "parentRoute": "expert",
+            "recordId": record_id,
+            "parentId": record_id,
+            "endpoint": "people-home",
+            "insertMode": False
+        },
+        "dataViewIds": None,
+        "formControlParameters": {
+            "_STATUSFILTER": status_filter,
+            "_JOBTITLEFILTER": None,
+            "_LOCATIONFILTER": None,
+            "_COMPANYLOCATION": None
+        },
+        "filter": {
+            "showParameterics": True,
+            "filters": [],
+            "filterEmployeeId": None
+        },
+        "paging": {
+            "start": start,
+            "limit": limit,
+            "end": start + limit - 1,
+            "total": 0  # Set to 0 for first request, use previous total for subsequent
+        },
+        "sort": {
+            "orderBy": sort_by,
+            "sortDirection": sort_direction
+        } if sort_by else {},
+        "additionalParameters": None,
+        "persistedGridData": None,
+        "gridData": {
+            "name": "copListingGridSection",
+            "data": [],
+            "total": 0
+        }
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_all_people(
+    bearer_token: str,
+    record_id: str,
+    search_value: str = "",
+    status_filter: str = None
+) -> list:
+    """
+    Fetch ALL people by iterating through pages.
+    
+    Returns:
+        List of all people records
+    """
+    all_people = []
+    start = 1
+    limit = 100  # Use max page size for efficiency
+    total = None
+    
+    while True:
+        result = fetch_people_page(
+            bearer_token=bearer_token,
+            record_id=record_id,
+            start=start,
+            limit=limit,
+            search_value=search_value,
+            status_filter=status_filter
+        )
+        
+        data = result.get("data", [])
+        all_people.extend(data)
+        
+        # Get total from first response
+        if total is None:
+            total = result.get("total", 0)
+        
+        # Check if we've fetched all records
+        if start + limit > total or len(data) == 0:
+            break
+        
+        start += limit
+    
+    return all_people
+Response Structure
+json{
+  "data": [
+    {
+      "id": "uuid-string",
+      "peopleId": "uuid-string",
+      "fullName": "John Smith",
+      "firstName": "John",
+      "lastName": "Smith",
+      "knownAs": "John",
+      "fNCFULLNAME": "John Smith",
+      "status": "Current",
+      "status_STORE": "Current",
+      "status_DISPLAY": "Current",
+      "referenceNumber": "12345",
+      "employeeCode": "0012345",
+      "jobTitle": "P10853 - Customer Service Advisor",
+      "jobTitle_STORE": "uuid-of-job-title",
+      "jobTitle_DISPLAY": "Customer Service Advisor",
+      "dateOfLeaving": null,
+      "niNumber": "AB123456C",
+      "image": "uuid-or-null",
+      "imageLastModified": "timestamp-or-null",
+      "context": "GB",
+      "_primaryKeys": "uuid:uuid|",
+      "_rowState": "UnModified"
+    }
+  ],
+  "total": 4380
+}
+Key Fields for People Records
+FieldTypeDescriptionidUUIDUnique record identifierpeopleIdUUIDPeople ID (use for subsequent API calls)fullNamestringFull name for displayfirstNamestringFirst namelastNamestringLast namestatusstringEmployment status: "Current", "Leaver", "None"referenceNumberstringEmployee reference numberemployeeCodestringEmployee code (padded with zeros)jobTitlestringFull job title with code prefixdateOfLeavingISO date/nullDate employee left (null if current)niNumberstringNational Insurance number
+Filter Values
+Status Filter (_STATUSFILTER)
+
+null - All statuses
+"Current" - Currently employed
+"Leaver" - Former employees
+"None" - No status assigned
+
+Sort Options (sort.orderBy)
+
+"fullName" - Sort by full name (default)
+
+Sort Direction (sort.sortDirection)
+
+"asc" - Ascending (A-Z)
+"desc" - Descending (Z-A)
+
+Authentication
+The bearer token is stored in the browser's sessionStorage:
+javascript// In browser console:
+sessionStorage.getItem('iHcmBearerToken')
+sessionStorage.getItem('associatedRecordId')  // Your user's record_id
+Rate Limiting Notes
+
+Use limit: 100 for bulk operations (maximum allowed)
+No explicit rate limits observed, but add reasonable delays between requests
+Total of 4380 records at 100 per page = 44 requests to fetch all

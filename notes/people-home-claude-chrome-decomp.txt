@@ -1,0 +1,85 @@
+ADP iHCM People Home Page - API Analysis
+Based on my investigation of the https://ihcm.adp.com/whrmux/web/expert/people-home page, here's a comprehensive breakdown of how the application is constructed and what APIs it uses:
+Architecture Overview
+Framework: AngularJS 1.8.3 (legacy Angular)
+Application Module: root with numerous sub-modules including ihcm.core, ihcm.home, schemaForm, and various service modules
+API Base Path: /whrmux/webapi
+Application Version: 2.0.456.3127
+Authentication
+The application uses bearer token authentication stored in sessionStorage:
+
+Key: iHcmBearerToken
+Context: GB (for UK instance)
+All API calls require this token in the Authorization header
+
+Key API Endpoints Discovered
+1. Schema Grid Data API (Primary People List)
+POST /whrmux/webapi/api/schema-grid/data
+This is the main endpoint that powers the People list grid. It's called whenever you search, filter, paginate, or sort the list.
+2. Data Endpoints
+GET /whrmux/webapi/api/data/expert/people-home?context=GB
+GET /whrmux/webapi/api/data/expert/people-home?insertMode=false&parameters={...}&parentId={uuid}&recordId={uuid}
+Parameters include:
+
+_STATUSFILTER - Status filter (None, Current, Leaver)
+_JOBTITLEFILTER - Job title filter
+_LOCATIONFILTER - Location filter
+_COMPANYLOCATION - Company location filter
+
+3. Individual Person Profile
+GET /whrmux/webapi/api/data/expert/{formId}?context=GB&recordId={peopleId}
+Example: /whrmux/webapi/api/data/expert/00000000-0000-0000-0000-000000000003?context=GB&recordId=00000000-0000-0000-0000-000000000001
+4. Employee Card API
+GET /whrmux/webapi/api/employee-card?peopleId={uuid}
+5. Form Navigation API
+GET /whrmux/webapi/api/formnavigation/expert/{endpoint}?context=GB&insertMode=false&parentId={uuid}&recordId={uuid}
+6. Form Schema APIs
+GET /whrmux/webapi/api/form/expert/{formId}?context=GB&insertMode=false&pageEndpoint={endpoint}&viewOnlyMode=false
+GET /whrmux/webapi/schemaapi/v1/schemas/{schemaHash}
+GET /whrmux/webapi/schemaapi/v2/versions/form/expert/{formId}
+GET /whrmux/webapi/schemaapi/v2/versions/formpicklist/expert/{formId}
+7. Dashboard Data APIs
+GET /whrmux/webapi/api/expert/dashboardLayout?templateId={uuid}
+GET /whrmux/webapi/api/expert/dashboard/expenserequests?peopleId={uuid}
+GET /whrmux/webapi/api/expert/dashboard/docclouddocuments?peopleId={uuid}
+8. Leave & Absence
+GET /whrmux/webapi/api/leave-absence/balance/{date}/{peopleId}
+GET /whrmux/webapi/api/leave-absence/show-calendar
+9. User & Image APIs
+GET /whrmux/webapi/api/user/image/{userId}/{hash}
+GET /whrmux/webapi/api/image/{uuid}/{imageType}/{...}
+10. Utility APIs
+GET /whrmux/webapi/api/messages/count
+GET /whrmux/webapi/api/navigation?isContentEditable=false
+GET /whrmux/webapi/api/app-setting
+GET /whrmux/webapi/api/db-parameters
+GET /whrmux/webapi/api/expert-helper?endpoint={endpoint}
+GET /whrmux/webapi/api/theme/{themeId}
+POST /whrmux/webapi/api/cop/userpersistant
+Key Angular Services
+The application uses these internal services for data handling:
+
+schemaGridService - Handles grid data operations
+schemaFormDataService - Manages form data, navigation, and picklists
+dynamicDataService - Dynamic data loading
+configService - Application configuration
+
+Data Model
+People records contain these fields (based on UI observation):
+
+fullName / preferredName
+referenceNumber (e.g., "2891")
+codeNumber / employeeCode (e.g., "0006140")
+jobTitle (e.g., "P11868 - Head of Design - Tech Services")
+status (None, Current, Leaver)
+niNumber (National Insurance Number)
+dateOfLeaving
+peopleId (UUID used for API calls)
+
+Automation Recommendations
+For automation, you'll want to focus on these key endpoints:
+
+List/Search People: POST /whrmux/webapi/api/schema-grid/data - This is the main endpoint for searching and listing. You'll need to reverse-engineer the POST body structure.
+Get Person Details: GET /whrmux/webapi/api/data/expert/{formId}?context=GB&recordId={peopleId}
+Employee Card: GET /whrmux/webapi/api/employee-card?peopleId={uuid} - Quick employee info
+Authentication: All requests need the bearer token from sessionStorage.getItem('iHcmBearerToken') in the Authorization header.

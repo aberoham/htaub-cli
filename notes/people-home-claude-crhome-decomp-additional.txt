@@ -1,0 +1,154 @@
+Complete POST Payload Structure for /whrmux/webapi/api/schema-grid/data
+Based on my detailed investigation of the AngularJS application, I've reverse-engineered the exact POST payload structure used by the People Home grid. Here's the complete documentation:
+API Endpoint
+POST https://ihcm.adp.com/whrmux/webapi/api/schema-grid/data
+Content-Type: application/json
+Authorization: Bearer {iHcmBearerToken from sessionStorage}
+Complete POST Payload Structure
+json{
+  "url": null,
+  "parentRoute": "expert",
+  "dataFromApi": false,
+  "recordId": "00000000-0000-0000-0000-000000000001",
+  "instanceName": "grid-controller-copListingGridSection",
+  "gridName": "copListingGridSection",
+  "searchValue": "John",
+  "formParams": {
+    "parentRoute": "expert",
+    "recordId": "00000000-0000-0000-0000-000000000001",
+    "parentId": "00000000-0000-0000-0000-000000000001",
+    "endpoint": "people-home",
+    "insertMode": false
+  },
+  "dataViewIds": null,
+  "formControlParameters": {
+    "_STATUSFILTER": null,
+    "_JOBTITLEFILTER": null,
+    "_LOCATIONFILTER": null,
+    "_COMPANYLOCATION": null
+  },
+  "filter": {
+    "showParameterics": true,
+    "filters": [],
+    "filterEmployeeId": "00000000-0000-0000-0000-000000000002"
+  },
+  "paging": {
+    "start": 1,
+    "limit": 20,
+    "end": 20,
+    "total": 4380
+  },
+  "sort": {
+    "orderBy": "fullName",
+    "sortDirection": "asc"
+  },
+  "additionalParameters": null,
+  "persistedGridData": null,
+  "gridData": {
+    "name": "copListingGridSection",
+    "data": [],
+    "total": 0
+  }
+}
+Field Descriptions
+Core Fields
+FieldTypeDescriptionparentRoutestringThe module/section (always "expert" for People Home)dataFromApibooleanWhether data comes from API (typically false)recordIdUUIDThe user's record IDinstanceNamestringGrid controller instance identifiergridNamestring"copListingGridSection" for People HomesearchValuestringFree text search query
+formParams Object
+FieldTypeDescriptionparentRoutestringModule route ("expert")recordIdUUIDUser's record IDparentIdUUIDParent record ID (same as recordId for root)endpointstring"people-home" for People listinsertModebooleanInsert mode flag
+formControlParameters Object (Filters)
+FieldTypeDescription_STATUSFILTERstring/nullStatus filter value: "Current", "Leaver", "None", or null for all_JOBTITLEFILTERstring/nullJob title filter (UUID)_LOCATIONFILTERstring/nullLocation filter (UUID)_COMPANYLOCATIONstring/nullCompany location filter
+filter Object
+FieldTypeDescriptionshowParametericsbooleanShow parametric filtersfiltersarrayArray of active filter objectsfilterEmployeeIdUUIDEmployee ID filter
+paging Object
+FieldTypeDescriptionstartnumberStart index (1-based)limitnumberPage size (typically 20, 50, or 100)endnumberEnd indextotalnumberTotal number of records
+sort Object
+FieldTypeDescriptionorderBystringField name to sort by ("fullName")sortDirectionstring"asc" or "desc"
+Response Structure
+The API returns:
+json{
+  "data": [
+    {
+      "id": "uuid",
+      "peopleId": "uuid",
+      "fullName": "John Smith",
+      "firstName": "John",
+      "lastName": "Smith",
+      "knownAs": "John",
+      "status": "Current",
+      "status_STORE": "Current",
+      "status_DISPLAY": "Current",
+      "referenceNumber": "12345",
+      "employeeCode": "0012345",
+      "jobTitle": "P10853 - Customer Service Advisor",
+      "jobTitle_STORE": "uuid",
+      "jobTitle_DISPLAY": "Customer Service Advisor",
+      "dateOfLeaving": null,
+      "niNumber": "AB123456C",
+      "image": "uuid or null",
+      "context": "GB",
+      "_primaryKeys": "key:value|",
+      "_rowState": "UnModified"
+    }
+  ],
+  "total": 4380
+}
+Example: Search for "John" with Status Filter
+json{
+  "parentRoute": "expert",
+  "dataFromApi": false,
+  "recordId": "your-user-record-id",
+  "instanceName": "grid-controller-copListingGridSection",
+  "gridName": "copListingGridSection",
+  "searchValue": "John",
+  "formParams": {
+    "parentRoute": "expert",
+    "recordId": "your-user-record-id",
+    "parentId": "your-user-record-id",
+    "endpoint": "people-home",
+    "insertMode": false
+  },
+  "dataViewIds": null,
+  "formControlParameters": {
+    "_STATUSFILTER": "Current",
+    "_JOBTITLEFILTER": null,
+    "_LOCATIONFILTER": null,
+    "_COMPANYLOCATION": null
+  },
+  "filter": {
+    "showParameterics": true,
+    "filters": [],
+    "filterEmployeeId": null
+  },
+  "paging": {
+    "start": 1,
+    "limit": 100,
+    "end": 100,
+    "total": 0
+  },
+  "sort": {
+    "orderBy": "fullName",
+    "sortDirection": "asc"
+  },
+  "additionalParameters": null,
+  "persistedGridData": null,
+  "gridData": {
+    "name": "copListingGridSection",
+    "data": [],
+    "total": 0
+  }
+}
+```
+
+## Required Headers
+```
+Content-Type: application/json
+Authorization: Bearer {token from sessionStorage.getItem('iHcmBearerToken')}
+Notes for Automation
+
+Getting your recordId: You'll need your user's recordId UUID which can be obtained from sessionStorage.getItem('associatedRecordId') or from the initial page load.
+Authentication: The bearer token is stored in sessionStorage.getItem('iHcmBearerToken') and has a limited lifetime (check sessionStorage.getItem('token_lifetime')).
+Context: The context parameter should be set based on your region (e.g., "GB" for UK).
+Pagination: For bulk operations, increase the limit to 100 and iterate through pages using start offset.
+Filters: The _STATUSFILTER accepts string values like "Current", "Leaver", "None".
+
+Would you like me to continue investigating specific aspects, such as how to get the bearer token programmatically or how to call other endpoints like individual person details?

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Output data (may contain PII)
+*.csv
+*.json
+
+# Auth tokens and session data
+curl_command*.txt
+.cache/
+.env
+
+# Debug artifacts
+auth_debug*.png
+auth_debug*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Claude Code
+.claude/
+uv.lock
