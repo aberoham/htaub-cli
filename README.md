@@ -1,6 +1,6 @@
-# ADP iHCM Integration Tools
+# htaub-cli
 
-Python scripts for extracting employee data and processing leave requests from ADP's iHCM portal.
+CLI automation for ADP iHCM. Access your own HR data without clicking through their "cutting-edge" Angular UI.
 
 ## Scripts
 
@@ -9,8 +9,9 @@ Python scripts for extracting employee data and processing leave requests from A
 | `leave_request_processor.py` | List, approve, reject leave requests |
 | `ihcm_extractor.py` | Extract employee directory to CSV/JSON |
 | `people_home_extractor.py` | Extract HR data with employee codes |
+| `payslip_sync.py` | Download all historical payslips (JSON + PDF) |
 
-All scripts use automatic Playwright-based authentication with optional 1Password integration.
+All scripts use Playwright-based authentication with optional 1Password integration.
 
 ## Setup Instructions
 
@@ -116,6 +117,26 @@ uv run ihcm_extractor.py
 uv run people_home_extractor.py
 ```
 
+### Syncing Payslips
+
+Download all your historical payslips with incremental sync support:
+
+```bash
+# Full sync (JSON + PDF)
+uv run payslip_sync.py
+
+# JSON only (skip PDF downloads)
+uv run payslip_sync.py --skip-pdf
+
+# PDF only (for already-cached payslips)
+uv run payslip_sync.py --pdf-only
+
+# List cached payslips without syncing
+uv run payslip_sync.py --list
+```
+
+Payslips are cached locally in `.cache/payslips/` organized by year and month. The script performs incremental sync, so running it multiple times only downloads new payslips.
+
 Options available for all scripts:
 - `--visible` - Show browser window during authentication
 - `--clear-cache` - Clear cached session and force fresh authentication
@@ -128,6 +149,16 @@ All exports are timestamped and saved in the current directory:
 - `ihcm_employees_YYYYMMDD_HHMMSS.json` - Employee directory (JSON format)
 - `people_home_YYYYMMDD_HHMMSS.csv` - HR data with employee codes
 - `people_home_YYYYMMDD_HHMMSS.json` - HR data (JSON format)
+
+Payslips are cached in `.cache/payslips/` organized by year/month:
+```
+.cache/payslips/
+├── index.json              # Master index
+├── 2025/12/
+│   ├── 2025-12-22.json     # Detailed payslip data
+│   └── 2025-12-22.pdf      # PDF document
+└── 2024/...
+```
 
 ## Troubleshooting
 

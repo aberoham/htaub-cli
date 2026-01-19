@@ -1,6 +1,6 @@
-# ADP iHCM API Integration
+# htaub-cli
 
-This project contains scripts to extract employee data from ADP's iHCM portal for comparison with Azure Active Directory.
+CLI automation for ADP iHCM: employee data extraction, leave request processing, and payslip sync.
 
 ## Code Quality
 
@@ -98,6 +98,50 @@ uv run leave_request_processor.py show <record_id>
 
 **Note:** This script uses automatic authentication via Playwright. If 1Password CLI is installed and configured, credentials are retrieved automatically; otherwise you'll be prompted to enter them.
 
+### Payslip Sync
+
+Downloads all historical payslips (JSON + PDF) from ADP iHCM with incremental sync support.
+
+```bash
+# Full sync (JSON + PDF)
+uv run payslip_sync.py
+
+# JSON only (skip PDF downloads)
+uv run payslip_sync.py --skip-pdf
+
+# PDF only (for already-cached payslips)
+uv run payslip_sync.py --pdf-only
+
+# List cached payslips without syncing
+uv run payslip_sync.py --list
+```
+
+Options:
+- `--skip-pdf` - Only download JSON data, skip PDF files
+- `--pdf-only` - Only download PDFs for already-cached payslips (skips JSON sync)
+- `--visible` - Show browser window during authentication
+- `--clear-cache` - Clear cached session and force fresh authentication
+- `--no-cache` - Skip session cache entirely
+- `--list` - List cached payslips and exit (no authentication required)
+
+**Cache Structure:**
+```
+.cache/payslips/
+├── index.json              # Master index tracking all synced payslips
+├── 2025/
+│   ├── 12/
+│   │   ├── 2025-12-22.json    # Detailed JSON
+│   │   └── 2025-12-22.pdf     # PDF document
+│   └── 11/
+│       └── ...
+└── 2024/
+    └── ...
+```
+
+**Note:** The script performs incremental sync - it only downloads payslips that aren't already cached. If a session expires mid-sync, progress is saved and can be resumed.
+
+**PDF Downloads:** PDFs are downloaded using the `/whrmux/webapi/api/pay/payslip/file` API endpoint (discovered Jan 2026). This endpoint accepts standard Bearer token authentication, unlike the `/v1_0/O/A/payStatement/` path which has SSO issues.
+
 ## iHCM API Reference
 
 Base URL: `https://ihcm.adp.com/whrmux/webapi/`
@@ -112,7 +156,10 @@ Base URL: `https://ihcm.adp.com/whrmux/webapi/`
 | `/api/data/me/home` | GET | Employee home dashboard |
 | `/api/data/me/my-details` | GET | Personal details |
 | `/api/leave-absence/balance/{date}` | GET | Leave balances |
-| `/api/pay/pay-statements/{count}` | GET | Pay statements |
+| `/api/pay/pay-statements/{count}` | GET | Pay statements (limited count) |
+| `/api/pay/pay-statement-query` | POST | Query all payslips with date filtering |
+| `/api/pay/pay-statement/{id}` | GET | Detailed payslip JSON breakdown |
+| `/api/pay/payslip/file` | GET | Download payslip PDF (params: statementId, imageId, imageType) |
 | `/api/navigation` | GET | Navigation menu structure |
 | `/api/employee-card` | GET | Individual employee HR details (code, ref#, status) |
 | `/api/schema-grid/data` | POST | Grid data for various sections (People Home, Leave Requests) |
@@ -399,7 +446,6 @@ Potential additional scripts based on discovered APIs:
 
 - Leave/absence calendar extraction
 - Org chart traversal (using `reportsTo` relationships)
-- Pay statement retrieval
 - Team-level reports for managers
 - Sickness record extraction (via `/api/data/expert/leave-absence` endpoints)
 
@@ -410,9 +456,9 @@ Potential additional scripts based on discovered APIs:
 | `ihcm_extractor.py` | Directory extraction script (uses `/api/employee`) |
 | `people_home_extractor.py` | HR data extraction (uses `/api/employee` + `/api/employee-card`) |
 | `leave_request_processor.py` | CLI for listing/approving/rejecting leave requests |
+| `payslip_sync.py` | Download and sync all historical payslips (JSON + PDF) |
 | `ihcm_auth.py` | Common authentication library using Playwright (1Password optional) |
-| `AUTH_NOTES.md` | Research notes on authentication flow |
-| `claude-chrome-decomposition.txt` | Original API discovery session |
+| `notes/AUTH_NOTES.md` | Research notes on authentication flow |
 
 ## Programmatic Authentication (Working)
 
@@ -465,14 +511,13 @@ Authenticated sessions are cached to `~/.cache/ihcm/session.json` for reuse acro
 
 **Session lifetime:**
 - JWT bearer tokens issued by ADP have a ~30 minute lifetime
-- The cache validation uses a 5-minute buffer, so tokens are considered expired 5 minutes before actual expiry
-- In practice, this means you have ~25 minutes between script runs before re-authentication is required
-- For longer workflows, consider running scripts in quick succession or accepting periodic re-authentication
+- However, session cookies often have sliding expiration and may remain valid longer
+- The cache always attempts validation regardless of JWT expiry time
 
 **Cache validation:**
-1. JWT bearer token expiry is checked (with 5-minute buffer)
-2. Lightweight API call to `/api/data/me/home` confirms server accepts the session
-3. If either check fails, cache is cleared and fresh authentication occurs
+1. Lightweight API call to `/api/data/me/home` confirms server accepts the session
+2. If validation succeeds, the session is reused (even if JWT appears expired)
+3. If validation fails, cache is cleared and fresh authentication occurs
 
 **Cache location:** `~/.cache/ihcm/session.json` (file permissions set to 0600 for security)
 
@@ -559,4 +604,4 @@ op item get "ADP IHCM" --fields password --reveal
 | File | Purpose |
 |------|---------|
 | `ihcm_auth.py` | Authentication module using Playwright |
-| `AUTH_NOTES.md` | Research notes on authentication flow |
+| `notes/AUTH_NOTES.md` | Research notes on authentication flow |

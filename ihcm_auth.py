@@ -45,12 +45,16 @@ from urllib3.util.retry import Retry
 
 # Try to import playwright and playwright-stealth - required for browser auth
 try:
+    from playwright.sync_api import Browser, BrowserContext, Playwright, sync_playwright
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    from playwright.sync_api import sync_playwright
     from playwright_stealth import Stealth
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
+    # Define dummy types for type hints when playwright not installed
+    Browser = type(None)
+    BrowserContext = type(None)
+    Playwright = type(None)
 
 
 # Debug log file - captures full request/response details
@@ -1036,6 +1040,43 @@ def _validate_session(session: requests.Session, verbose: bool = True) -> bool:
         return False
 
 
+class AuthResult:
+    """
+    Result of browser-based authentication.
+
+    Contains both a requests.Session for API calls and optionally a browser context
+    that can be used for operations requiring a live browser (e.g., PDF downloads).
+    """
+
+    def __init__(
+        self,
+        session: requests.Session,
+        browser_context: 'BrowserContext | None' = None,
+        playwright_instance: 'Playwright | None' = None,
+        browser: 'Browser | None' = None,
+    ):
+        self.session = session
+        self.browser_context = browser_context
+        self._playwright = playwright_instance
+        self._browser = browser
+
+    def close_browser(self) -> None:
+        """Close the browser and playwright instance if open."""
+        if self._browser:
+            self._browser.close()
+            self._browser = None
+            self.browser_context = None
+        if self._playwright:
+            self._playwright.stop()
+            self._playwright = None
+
+    def __enter__(self) -> 'AuthResult':
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close_browser()
+
+
 def create_authenticated_session_playwright(
     item_name: str = ONEPASSWORD_ITEM,
     verbose: bool = True,
@@ -1073,27 +1114,26 @@ def create_authenticated_session_playwright(
                 created = cache_data.get('created_at', 'unknown')
                 print(f'  Found cached session from {created}')
 
-            # Check if token is expired
-            if cache.is_token_expired(cache_data['bearer_token']):
+            # Check JWT expiry as informational only - session cookies may still work
+            token_expired = cache.is_token_expired(cache_data['bearer_token'])
+            if token_expired and verbose:
+                print('  Note: JWT token expired, but trying session anyway...')
+
+            # Always try to validate - session cookies often have sliding expiration
+            if verbose:
+                print('  Validating cached session...')
+
+            session = _reconstruct_session_from_cache(cache_data, verbose)
+
+            if _validate_session(session, verbose):
                 if verbose:
-                    print('  Token expired, will re-authenticate')
-                cache.clear()
+                    print('  Cached session is valid!')
+                cache.update_last_validated()
+                return session
             else:
-                # Reconstruct session and validate with API call
                 if verbose:
-                    print('  Validating cached session...')
-
-                session = _reconstruct_session_from_cache(cache_data, verbose)
-
-                if _validate_session(session, verbose):
-                    if verbose:
-                        print('  Cached session is valid!')
-                    cache.update_last_validated()
-                    return session
-                else:
-                    if verbose:
-                        print('  Cached session invalid, will re-authenticate')
-                    cache.clear()
+                    print('  Cached session invalid, will re-authenticate')
+                cache.clear()
         else:
             if verbose:
                 print('  No cached session found')
@@ -1126,6 +1166,318 @@ def create_authenticated_session_playwright(
         cache.save(bearer_token, cookies, xsrf_token)
 
     return session
+
+
+def _authenticate_with_browser_kept_alive(
+    username: str,
+    password: str,
+    verbose: bool = True,
+    headless: bool = True,
+    timeout: int = 60000,
+    browser_type: str = 'chromium',
+) -> AuthResult:
+    """
+    Authenticate and return both session and live browser context.
+
+    Unlike authenticate_with_playwright(), this keeps the browser running
+    so it can be used for subsequent requests (e.g., PDF downloads) that
+    require the SiteMinder SSO session.
+    """
+    if not PLAYWRIGHT_AVAILABLE:
+        raise RuntimeError(
+            'Playwright and playwright-stealth are required for browser-based authentication.\n'
+            'Install with: uv pip install playwright playwright-stealth && uv run playwright install chromium'
+        )
+
+    if verbose:
+        print(f'Starting browser-based authentication ({browser_type})...')
+
+    p = sync_playwright().start()
+    browser_launcher = getattr(p, browser_type, p.chromium)
+    browser = browser_launcher.launch(headless=headless, slow_mo=100)
+    context = browser.new_context(
+        user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        viewport={'width': 1280, 'height': 800},
+    )
+    page = context.new_page()
+
+    # Apply stealth mode to evade bot detection
+    if verbose:
+        print('  Applying stealth mode...')
+    Stealth().apply_stealth_sync(page)
+
+    try:
+        # Navigate to iHCM - let the full redirect chain complete
+        if verbose:
+            print('  Navigating to iHCM (following SSO redirects)...')
+
+        page.goto(
+            f'{IHCM_BASE_URL}/whrmux/web/me/home',
+            wait_until='networkidle',
+            timeout=timeout,
+        )
+
+        # Wait for page to fully stabilize after navigation
+        time.sleep(10)
+
+        # Wait for username field to appear
+        if verbose:
+            print('  Waiting for login form...')
+
+        username_input = page.wait_for_selector(
+            'input[name="userId"], input[name="user"], input[type="email"], input[type="text"]',
+            state='visible',
+            timeout=timeout,
+        )
+
+        if verbose:
+            print('  Entering username...')
+        username_input.fill(username)
+
+        # Click Next and wait for password field
+        if verbose:
+            print('  Clicking Next...')
+
+        time.sleep(2)
+
+        try:
+            next_btn = page.locator('text=Next').first
+            next_btn.wait_for(state='visible', timeout=timeout)
+            next_btn.click()
+        except PlaywrightTimeout:
+            screenshot_path = Path('auth_failure_next_btn.png')
+            page.screenshot(path=str(screenshot_path))
+            if verbose:
+                print(f'  Debug screenshot saved to {screenshot_path}')
+                print(f'  Current URL: {page.url}')
+            raise
+
+        time.sleep(5)
+
+        # Wait for password field
+        if verbose:
+            print('  Waiting for password field...')
+
+        password_input = page.wait_for_selector(
+            'input[type="password"]',
+            state='visible',
+            timeout=timeout,
+        )
+
+        if verbose:
+            print('  Entering password...')
+        password_input.fill(password)
+
+        # Submit and wait for navigation back to iHCM
+        if verbose:
+            print('  Submitting login...')
+
+        submit_btn = page.query_selector(
+            'button[type="submit"], button:has-text("Sign In"), button:has-text("Login")'
+        )
+        if submit_btn:
+            submit_btn.click()
+        else:
+            password_input.press('Enter')
+
+        time.sleep(10)
+
+        # Poll for bearer token in sessionStorage
+        if verbose:
+            print('  Waiting for authentication to complete...')
+
+        bearer_token = None
+        for _ in range(30):
+            time.sleep(1)
+            try:
+                bearer_token = page.evaluate('() => sessionStorage.getItem("iHcmBearerToken")')
+                if bearer_token:
+                    break
+            except Exception:
+                pass
+
+        if not bearer_token:
+            raise RuntimeError(
+                f'Login did not complete successfully. Final URL: {page.url}'
+            )
+
+        if verbose:
+            print('  Bearer token acquired!')
+
+        # Extract cookies from browser context
+        if verbose:
+            print('  Extracting cookies...')
+        cookies = context.cookies()
+
+        xsrf_token = None
+        for cookie in cookies:
+            if cookie['name'] == 'XSRF-TOKEN':
+                xsrf_token = cookie['value']
+                break
+
+        if verbose:
+            print(f'  Extracted {len(cookies)} cookies')
+
+        # Close the page but keep context and browser alive
+        page.close()
+
+    except PlaywrightTimeout as e:
+        browser.close()
+        p.stop()
+        raise RuntimeError(f'Authentication timed out: {e}') from e
+    except Exception as e:
+        browser.close()
+        p.stop()
+        error_msg = str(e)
+        if 'Page crashed' in error_msg or 'browser has disconnected' in error_msg.lower():
+            raise RuntimeError(
+                f'Browser crashed during authentication. This may indicate the browser '
+                f'is not properly installed. Try running:\n'
+                f'  uv run playwright install {browser_type}\n\n'
+                f'Original error: {e}'
+            ) from e
+        raise RuntimeError(f'Authentication failed: {e}') from e
+
+    # Build a requests session with the extracted auth
+    if verbose:
+        print('  Configuring session...')
+
+    session = create_session()
+
+    for cookie in cookies:
+        session.cookies.set(
+            cookie['name'],
+            cookie['value'],
+            domain=cookie.get('domain', ''),
+            path=cookie.get('path', '/'),
+        )
+
+    session.headers.update({
+        'Accept': 'application/json, text/plain, */*',
+        'Content-Type': 'application/json;charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Origin': IHCM_BASE_URL,
+        'Referer': f'{IHCM_BASE_URL}/whrmux/web/me/directory/',
+        'Authorization': f'Bearer {bearer_token}',
+    })
+
+    if xsrf_token:
+        session.headers['X-XSRF-TOKEN'] = xsrf_token
+
+    if verbose:
+        print('  Browser authentication complete (browser kept alive for PDF downloads)')
+
+    return AuthResult(
+        session=session,
+        browser_context=context,
+        playwright_instance=p,
+        browser=browser,
+    )
+
+
+def create_authenticated_session_with_browser(
+    item_name: str = ONEPASSWORD_ITEM,
+    verbose: bool = True,
+    headless: bool = True,
+    use_cache: bool = True,
+    browser_type: str = 'chromium',
+) -> AuthResult:
+    """
+    Create an authenticated session with optional live browser context.
+
+    This is designed for workflows that need both:
+    1. A requests.Session for fast JSON API calls
+    2. A live browser context for operations requiring SiteMinder SSO (e.g., PDF downloads)
+
+    When the cache is valid, returns AuthResult with session only (no browser).
+    When fresh auth is needed, returns AuthResult with both session and browser context.
+
+    Use as a context manager to ensure browser cleanup:
+
+        with create_authenticated_session_with_browser() as auth:
+            # Use auth.session for API calls
+            response = auth.session.get(api_url)
+
+            # Use auth.browser_context for PDF downloads if available
+            if auth.browser_context:
+                page = auth.browser_context.new_page()
+                # ... download PDF via browser
+
+    Args:
+        item_name: Name of the 1Password item containing credentials
+        verbose: Whether to print progress messages
+        headless: Whether to run browser in headless mode
+        use_cache: Whether to attempt using a cached session (default: True)
+        browser_type: Browser to use ('chromium', 'firefox', or 'webkit')
+
+    Returns:
+        AuthResult containing session and optionally browser_context
+    """
+    cache = SessionCache(verbose=verbose)
+
+    # Try to use cached session first
+    if use_cache:
+        if verbose:
+            print('Checking for cached session...')
+
+        cache_data = cache.load()
+        if cache_data:
+            if verbose:
+                created = cache_data.get('created_at', 'unknown')
+                print(f'  Found cached session from {created}')
+
+            # Check JWT expiry as informational only - session cookies may still work
+            token_expired = cache.is_token_expired(cache_data['bearer_token'])
+            if token_expired and verbose:
+                print('  Note: JWT token expired, but trying session anyway...')
+
+            # Always try to validate - session cookies often have sliding expiration
+            if verbose:
+                print('  Validating cached session...')
+
+            session = _reconstruct_session_from_cache(cache_data, verbose)
+
+            if _validate_session(session, verbose):
+                if verbose:
+                    print('  Cached session is valid!')
+                cache.update_last_validated()
+                # Return session-only AuthResult (no browser)
+                return AuthResult(session=session)
+            else:
+                if verbose:
+                    print('  Cached session invalid, will re-authenticate')
+                cache.clear()
+        else:
+            if verbose:
+                print('  No cached session found')
+
+    # No valid cache, proceed with fresh authentication (keeping browser alive)
+    username, password = get_credentials(item_name, verbose=verbose)
+
+    if verbose:
+        print(f'  Username: {username}')
+
+    auth_result = _authenticate_with_browser_kept_alive(
+        username, password, verbose=verbose, headless=headless, browser_type=browser_type
+    )
+
+    # Cache the new session for future use
+    if use_cache:
+        cookies = []
+        for cookie in auth_result.session.cookies:
+            cookies.append({
+                'name': cookie.name,
+                'value': cookie.value,
+                'domain': cookie.domain,
+                'path': cookie.path,
+            })
+
+        bearer_token = auth_result.session.headers.get('Authorization', '').replace('Bearer ', '')
+        xsrf_token = auth_result.session.headers.get('X-XSRF-TOKEN')
+
+        cache.save(bearer_token, cookies, xsrf_token)
+
+    return auth_result
 
 
 def test_authentication(
